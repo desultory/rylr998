@@ -102,7 +102,11 @@ class LoRa:
         while True:
             if callback:
                 callback(f"[b] {message}")
-            await self.send_message(message)
+            try:
+                await self.send_message(message)
+            except TimeoutError:
+                print("Module timed out sending beacon, resetting.")
+                await self.reset()
             await sleep_ms(interval)
 
     async def query(self, query):
@@ -256,6 +260,7 @@ class LoRa:
     async def reset(self):
         print("Resetting LoRa module.")
         self.reset_pin.off()
+        self.initialized.clear()
         await sleep_ms(100)
         self.reset_pin.on()
         await sleep_ms(50)

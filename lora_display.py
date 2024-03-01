@@ -12,7 +12,7 @@ class LoRaDisplay(Display):
 
     async def start(self):
         await super().start()
-        self.lora.start()
+        self.lora.create_tasks()
         await self.lora.initialized.wait()
         self.text_lines += 'LoRa initialized'
         create_task(self.get_msg())
