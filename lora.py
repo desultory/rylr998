@@ -70,6 +70,7 @@ class LoRa:
         self.messages = []
         self.message_flag = Event()
         self.response = None
+        self.error = None
 
     def create_tasks(self):
         from asyncio import create_task
@@ -171,7 +172,7 @@ class LoRa:
             raise ValueError("[%s]Error: %s" % (cmd[:-2], response))
         return response
 
-    async def send(self, data, timeout=1000):
+    async def send(self, data, timeout=5000):
         """ Sends a command over UART """
         start_time = ticks_ms()
         async with self.seat:
@@ -218,6 +219,8 @@ class LoRa:
         if data[:4] == '+RCV':
             self.messages.append(LoRaMessage.from_str(data[5:-2]))
             self.message_flag.set()
+        elif data[:4] == '+ERR':
+            self.error = (ticks_ms(), data[5:-2])
         else:
             self.response = data[1:-2]
         return data
