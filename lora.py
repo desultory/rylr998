@@ -11,15 +11,15 @@ class LoRaMessage:
         fields = packet.split(',')
         return LoRaMessage(fields[0], fields[1], fields[2], fields[3], fields[4])
 
-    def __init__(self, sender, receiver, data, rssi, snr):
+    def __init__(self, sender, length, data, rssi, snr):
         self.sender = sender
-        self.receiver = receiver
+        self.length = length
         self.data = data
         self.rssi = rssi
         self.snr = snr
 
     def __str__(self):
-        return f"[{self.sender} -> {self.receiver} <rssi: {self.rssi} snr:{self.snr}>] {self.data}"
+        return f"[{self.sender} <rssi: {self.rssi} snr:{self.snr}>] {self.data}"
 
 
 class LoRa:
@@ -67,8 +67,10 @@ class LoRa:
 
         self.initialized = Event()
         self.seat = Lock()
+
         self.messages = []
         self.message_flag = Event()
+        self.response_times = []
         self.response = None
         self.error = None
 
@@ -87,6 +89,7 @@ class LoRa:
 
     async def send_message(self, message, target=0):
         print(f"[{target}@{self.network}] Sending message: {message}")
+        target = int(target) if not isinstance(target, int) else target
         return await self.send_command('send', params=(target, len(message), message))
 
     def get_message(self):
@@ -97,18 +100,6 @@ class LoRa:
             if len(self.messages) == 1:
                 self.message_flag.clear()
             return self.messages.pop()
-
-    async def beacon(self, message, interval, callback=None):
-        await self.initialized.wait()
-        while True:
-            if callback:
-                callback(f"[b] {message}")
-            try:
-                await self.send_message(message)
-            except TimeoutError:
-                print("Module timed out sending beacon, resetting.")
-                await self.reset()
-            await sleep_ms(interval)
 
     async def query(self, query):
         return await self.send_command(query, True)
@@ -182,6 +173,7 @@ class LoRa:
             await self.writer.drain()
             while not self.response:
                 if ticks_diff(ticks_ms(), start_time) > timeout:
+                    print("Response timed out")
                     raise TimeoutError("Got no response from LoRa module after timeout: %sms" % timeout)
                 if self.debug:
                     print(f"Waiting for response, elapsed: {ticks_diff(ticks_ms(), start_time)}ms")
@@ -197,18 +189,24 @@ class LoRa:
         while True:
             try:
                 data = await self.recv()
+                if self.debug:
+                    print(f"Got data: {data.rstrip()}")
+                    print(f"Average response time: {sum(self.response_times) / len(self.response_times)}")
             except TimeoutError:
                 if self.debug:
-                    print("No data received.")
-            if self.debug:
-                print(f"Got data: {data.rstrip()}")
+                    print("No data received before timeout.")
+            except ValueError as e:
+                print(e)
+                await self.reset()
 
     async def recv(self):
         """ Gets a single line from the UART, puts it in self.messages or self.response based on the data. """
         if self.debug:
             print("Waiting for data...")
 
+        start_time = ticks_ms()
         data = await wait_for(self.reader.readline(), 15)
+        self.response_times.append(ticks_diff(ticks_ms(), start_time))
 
         if data[-2:] != b'\r\n':
             raise ValueError("Data missing expected termination characters: %s", data)
@@ -217,9 +215,13 @@ class LoRa:
 
         data = data.decode()
         if data[:4] == '+RCV':
+            if self.debug:
+                print(f"Got new message: {data[:4]}")
             self.messages.append(LoRaMessage.from_str(data[5:-2]))
             self.message_flag.set()
         elif data[:4] == '+ERR':
+            if self.debug:
+                print(f"Error: {data[5:-2]}")
             self.error = (ticks_ms(), data[5:-2])
         else:
             self.response = data[1:-2]

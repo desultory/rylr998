@@ -1,4 +1,3 @@
-from asyncio import sleep_ms, create_task
 from display import Display
 from lora import LoRa
 
@@ -12,22 +11,15 @@ class LoRaDisplay(Display):
 
     async def start(self):
         await super().start()
-        self.lora.create_tasks()
-        await self.lora.initialized.wait()
+        if not self.lora.initialized:
+            self.lora.create_tasks()
+            await self.lora.initialized.wait()
         self.text_lines += 'LoRa initialized'
-        create_task(self.get_msg())
-        create_task(self.lora.beacon('hello', 5000, self.beacon_callback))
 
     def beacon_callback(self, msg):
         self.text_lines += msg + '\n'
 
-    async def get_msg(self):
-        while True:
-            await self.lora.message_flag.wait()
-            if msg := self.lora.get_message():
-                self.text_lines += f'[{msg.sender}] {msg.data}\n'
-                print(msg)
-            else:
-                await sleep_ms(250)
-                print("No new messages")
+    def message_callback(self, msg):
+        self.text_lines += f'[{msg.sender}] {msg.data}\n'
+        print(msg)
 
